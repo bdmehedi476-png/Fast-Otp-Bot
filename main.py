@@ -7,26 +7,33 @@ import threading
 import time
 from flask import Flask
 
-# ==================== CONFIGURATION ====================
-BOT_TOKEN = "8923498683:AAGZWmpxCp4ZlsTqacLjFUi52HrFO4sIMSM"
+# ==================== BOT CONFIGURATION ====================
+BOT_TOKEN = "8923498683:AAHlHA8-GASExZDVnuR_lBORSaVvIhiqK5o"
 ADMIN_ID = 7159155182
 BOT_USERNAME = "@FastOTP3_Bot"
 
 # Channels & Groups
 OTP_CHANNEL = "@FastOTPBot_1"
-SUPPORT_CHANNEL = "@FastOtpSupportMathhodChannel"
+SUPPORT_CHANNEL = "@SupportMathhodChannel"
 SUPPORT_USERNAME = "@Owner_010"
-
-# Lamix API Credentials
-LAMIX_API_TOKEN = "q3zv3ACa1Sk5hJeKaBuvj8qDNrpJXssqZxRrgPdDT"
 
 # Settings
 MIN_WITHDRAW = 1.00
-TARGET_STOCK_LIMIT = 50  # প্রতি কান্ট্রিতে মিনিমাম ৫০টি নাম্বারের টার্গেট স্টক
+
+# ==================== MULTI-PANEL / API CONFIGURATION ====================
+ACTIVE_PROVIDER = "lamix"
+
+API_CONFIG = {
+    "lamix": {
+        "token": "q3zv3ACa1Sk5hJeKaBuvj8qDNrpJXssqZxRrgPdDT",
+        "numbers_url": "https://panel.lamix.org/api/v1/numbers",
+        "cdrs_url": "https://panel.lamix.org/api/v1/cdrs"
+    }
+}
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Expanded Country Prefix Mapping & Flags (All World Countries Supported)
+# ==================== COUNTRY MAP ====================
 COUNTRY_MAP = {
     "1":   {"name": "USA / Canada", "flag": "🇺🇸"},
     "7":   {"name": "Russia / Kazakhstan", "flag": "🇷🇺"},
@@ -164,6 +171,43 @@ def mark_otp_posted(otp_id):
     conn.commit()
     conn.close()
 
+# ==================== UNIVERSAL API HANDLER ====================
+class OTPProviderAPI:
+    @staticmethod
+    def fetch_numbers():
+        cfg = API_CONFIG.get(ACTIVE_PROVIDER)
+        if not cfg:
+            return []
+        
+        headers = {"Authorization": f"Bearer {cfg['token']}"}
+        try:
+            res = requests.get(cfg["numbers_url"], headers=headers, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                if isinstance(data, list):
+                    return data
+                elif isinstance(data, dict):
+                    return data.get("data", data.get("numbers", []))
+        except Exception as e:
+            print(f"[{ACTIVE_PROVIDER}] API Numbers Fetch Error: {e}")
+        return []
+
+    @staticmethod
+    def fetch_cdrs():
+        cfg = API_CONFIG.get(ACTIVE_PROVIDER)
+        if not cfg:
+            return []
+            
+        headers = {"Authorization": f"Bearer {cfg['token']}"}
+        try:
+            res = requests.get(cfg["cdrs_url"], headers=headers, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                return data if isinstance(data, list) else data.get("data", data.get("cdrs", []))
+        except Exception as e:
+            print(f"[{ACTIVE_PROVIDER}] API CDR Fetch Error: {e}")
+        return []
+
 # ==================== FORCE JOIN CHECKER ====================
 def check_join(user_id):
     try:
@@ -188,22 +232,6 @@ def send_join_msg(chat_id):
     )
     bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
 
-# ==================== API HELPER ====================
-def fetch_lamix_numbers():
-    headers = {"Authorization": f"Bearer {LAMIX_API_TOKEN}"}
-    url = "https://panel.lamix.org/api/v1/numbers"
-    try:
-        res = requests.get(url, headers=headers, timeout=12)
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, list):
-                return data
-            elif isinstance(data, dict):
-                return data.get("data", data.get("numbers", []))
-    except Exception as e:
-        print(f"API Fetch Error: {e}")
-    return []
-
 # ==================== MAIN KEYBOARD ====================
 def main_menu():
     markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -223,33 +251,28 @@ def main_menu():
 
 # ==================== AUTO POST INBOUND OTP TO CHANNEL ====================
 def auto_post_otps_to_channel():
-    headers = {"Authorization": f"Bearer {LAMIX_API_TOKEN}"}
     while True:
         try:
-            url = "https://panel.lamix.org/api/v1/cdrs"
-            res = requests.get(url, headers=headers, timeout=10)
-            if res.status_code == 200:
-                data = res.json()
-                records = data if isinstance(data, list) else data.get("data", data.get("cdrs", []))
-                for record in records:
-                    rec_id = str(record.get("id") or f"{record.get('number')}_{record.get('time')}")
+            records = OTPProviderAPI.fetch_cdrs()
+            for record in records:
+                rec_id = str(record.get("id") or f"{record.get('number')}_{record.get('time')}")
+                
+                if not is_otp_posted(rec_id):
+                    num = record.get("number") or record.get("phone")
+                    otp_msg = clean_md(record.get("otp") or record.get("code") or record.get("text"))
                     
-                    if not is_otp_posted(rec_id):
-                        num = record.get("number") or record.get("phone")
-                        otp_msg = clean_md(record.get("otp") or record.get("code") or record.get("text"))
-                        
-                        if num and otp_msg:
-                            ch_post = (
-                                f"⚡ **Live Inbound OTP Received!**\n\n"
-                                f"📞 **Number:** `+{num}`\n"
-                                f"🔑 **Message / OTP:** `{otp_msg}`\n\n"
-                                f"🤖 **Bot:** {clean_md(BOT_USERNAME)}"
-                            )
-                            try:
-                                bot.send_message(OTP_CHANNEL, ch_post, parse_mode="Markdown")
-                                mark_otp_posted(rec_id)
-                            except Exception as post_err:
-                                print(f"❌ Channel Post Error: {post_err}")
+                    if num and otp_msg:
+                        ch_post = (
+                            f"⚡ **Live Inbound OTP Received!**\n\n"
+                            f"📞 **Number:** `+{num}`\n"
+                            f"🔑 **Message / OTP:** `{otp_msg}`\n\n"
+                            f"🤖 **Bot:** {clean_md(BOT_USERNAME)}"
+                        )
+                        try:
+                            bot.send_message(OTP_CHANNEL, ch_post, parse_mode="Markdown")
+                            mark_otp_posted(rec_id)
+                        except Exception as post_err:
+                            print(f"❌ Channel Post Error: {post_err}")
         except Exception as e:
             print(f"Auto-post background error: {e}")
         
@@ -310,8 +333,8 @@ def process_get_number(message):
         send_join_msg(message.chat.id)
         return
 
-    bot.send_message(message.chat.id, "⏳ Fetching all available countries from Lamix API...")
-    records = fetch_lamix_numbers()
+    bot.send_message(message.chat.id, "⏳ Fetching live real numbers from API...")
+    records = OTPProviderAPI.fetch_numbers()
     
     prefixes = {}
     if records:
@@ -330,23 +353,22 @@ def process_get_number(message):
             if prefix:
                 prefixes[prefix] = prefixes.get(prefix, 0) + 1
 
-    # API থেকে পাওয়া প্রিফিক্স এবং ম্যাপ করা সব কান্ট্রি মার্জ করা
-    all_prefixes = set(prefixes.keys()).union(set(COUNTRY_MAP.keys()))
-
+    # সব কান্ট্রি ম্যাপ এবং এপিআই-এর আসল গণনা মার্জ করা
+    all_prefixes = set(COUNTRY_MAP.keys())
     markup = types.InlineKeyboardMarkup(row_width=1)
     
     for pfx in sorted(all_prefixes, key=lambda x: int(x) if str(x).isdigit() else 999):
-        count = prefixes.get(pfx, 0)
-        display_count = count if count >= TARGET_STOCK_LIMIT else TARGET_STOCK_LIMIT
+        # আসল লাইভ স্টকের গণনা নেওয়া হচ্ছে (নাই থাকলে ০ দেখাবে)
+        real_count = prefixes.get(pfx, 0)
         
         c_info = COUNTRY_MAP.get(str(pfx), {"name": f"Country (+{pfx})", "flag": "🌐"})
-        btn_text = f"{c_info['flag']} {c_info['name']} (+{pfx}) - {display_count} Available | $0.0045/OTP"
+        btn_text = f"{c_info['flag']} {c_info['name']} (+{pfx}) - {real_count} Available | $0.0045/OTP"
         markup.add(types.InlineKeyboardButton(btn_text, callback_data=f"country_{pfx}"))
 
     bot.send_message(message.chat.id, "🌐 **Select a Country for Any Service:**", reply_markup=markup, parse_mode="Markdown")
 
 def display_country_numbers(chat_id, user_id, prefix):
-    records = fetch_lamix_numbers()
+    records = OTPProviderAPI.fetch_numbers()
     all_country_numbers = []
     
     if records:
@@ -358,21 +380,19 @@ def display_country_numbers(chat_id, user_id, prefix):
     used_set = get_used_numbers(user_id)
     fresh_numbers = [num for num in all_country_numbers if num not in used_set]
 
-    # যদি লাইভ এপিআই-তে নাম্বার কম থাকে তবে ডায়নামিক জেনারেটর ৫০টি ফ্রেশ স্টকে রাখবে
-    if len(fresh_numbers) < 5:
-        base_num = int(str(prefix) * 4 + "100200") if str(prefix).isdigit() else 8801100200
-        for i in range(TARGET_STOCK_LIMIT):
-            gen_num = str(base_num + (i * 7))
-            if gen_num not in used_set and gen_num not in fresh_numbers:
-                fresh_numbers.append(gen_num)
+    # যদি এপিআই প্যানেলে কোনো লাইভ নাম্বার না থাকে
+    if not fresh_numbers:
+        bot.send_message(chat_id, "❌ **দুঃখিত!** এই মুহূর্তে এই দেশের কোনো আসল নাম্বার প্যানেলে এভেলেবল নেই। প্যানেলে নাম্বার যুক্ত হলে অটোমেটিক চলে আসবে।")
+        return
 
+    # সর্বোচ্চ ৫টি আসল নাম্বার ইউজারকে দেওয়া হবে
     sliced_nums = fresh_numbers[:5]
     mark_numbers_as_used(user_id, sliced_nums)
     set_active_number(user_id, sliced_nums[0])
     
     c_info = COUNTRY_MAP.get(str(prefix), {"name": f"Country (+{prefix})", "flag": "🌐"})
     
-    msg_text = f"{c_info['flag']} **{c_info['name']} Fresh Numbers (Any Service):**\n⌛ *Waiting for OTP...*\n\n"
+    msg_text = f"{c_info['flag']} **{c_info['name']} Live Real Numbers:**\n⌛ *Waiting for OTP...*\n\n"
     for n in sliced_nums:
         msg_text += f"📱 `+{n}`\n"
 
@@ -425,29 +445,20 @@ def check_otp_action(call):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("📢 Go to Live OTP Channel", url=otp_ch_url))
     
-    headers = {"Authorization": f"Bearer {LAMIX_API_TOKEN}"}
-    url = "https://panel.lamix.org/api/v1/cdrs"
-    
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            records = data if isinstance(data, list) else data.get("data", data.get("cdrs", []))
-            for rec in records:
-                num = str(rec.get("number") or rec.get("phone", ""))
-                if num and num.endswith(str(active_num)[-8:]):
-                    otp_msg = clean_md(rec.get("otp") or rec.get("code") or rec.get("text", ""))
-                    if otp_msg:
-                        success_text = (
-                            f"🎉 **OTP Received!**\n\n"
-                            f"📞 **Number:** `+{num}`\n"
-                            f"🔑 **OTP:** `{otp_msg}`\n\n"
-                            f"📢 **Check Live Post in Channel:**"
-                        )
-                        bot.send_message(call.message.chat.id, success_text, parse_mode="Markdown", reply_markup=markup)
-                        return
-    except Exception as e:
-        print(f"OTP Check Error: {e}")
+    records = OTPProviderAPI.fetch_cdrs()
+    for rec in records:
+        num = str(rec.get("number") or rec.get("phone", ""))
+        if num and num.endswith(str(active_num)[-8:]):
+            otp_msg = clean_md(rec.get("otp") or rec.get("code") or rec.get("text", ""))
+            if otp_msg:
+                success_text = (
+                    f"🎉 **OTP Received!**\n\n"
+                    f"📞 **Number:** `+{num}`\n"
+                    f"🔑 **OTP:** `{otp_msg}`\n\n"
+                    f"📢 **Check Live Post in Channel:**"
+                )
+                bot.send_message(call.message.chat.id, success_text, parse_mode="Markdown", reply_markup=markup)
+                return
 
     pending_text = (
         f"⏳ **Searching for OTP for number:** `+{active_num}`\n\n"
@@ -499,11 +510,11 @@ def refer_handler(message):
 
 @bot.message_handler(func=lambda msg: msg.text == "📊 Live Traffic")
 def traffic_handler(message):
-    records = fetch_lamix_numbers()
-    active_count = len(records) if records else 150
+    records = OTPProviderAPI.fetch_numbers()
+    active_count = len(records) if records else 0
     text = (
         f"📊 **Live System Traffic**\n\n"
-        f"🟢 **Active Numbers:** `{active_count}`\n"
+        f"🟢 **Active Real Numbers:** `{active_count}`\n"
         f"⚡ **System Status:** `Operational 100%`"
     )
     bot.send_message(message.chat.id, text, parse_mode="Markdown")
@@ -523,12 +534,12 @@ def leaderboard_handler(message):
 def search_num_handler(message):
     bot.send_message(message.chat.id, "🔎 Send the specific phone number you want to search:")
 
-# ==================== DUMMY WEB SERVER FOR RENDER ====================
+# ==================== DUMMY WEB SERVER FOR RENDER / VPS ====================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Fast OTP Bot is running smoothly!"
+    return f"Fast OTP Bot ({BOT_USERNAME}) is running smoothly!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
