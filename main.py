@@ -8,7 +8,7 @@ import time
 from flask import Flask
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8923498683:AAHlHA8-GASExZDVnuR_lBORSaVvIhiqK5o"
+BOT_TOKEN = "8923498683:AAGZWmpxCp4ZlsTqacLjFUi52HrFO4sIMSM"
 ADMIN_ID = 7159155182
 BOT_USERNAME = "@FastOTP3_Bot"
 
