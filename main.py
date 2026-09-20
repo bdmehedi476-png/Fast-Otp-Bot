@@ -321,9 +321,9 @@ if __name__ == "__main__":
     # Run Flask in a separate thread so it satisfies Render's port binding requirement
     threading.Thread(target=run_web, daemon=True).start()
     
-    print("Bot is running with Web Port Binding...")
+        print("Bot is running with Web Port Binding...")
     try:
-        bot.remove_webhook(drop_pending_updates=True)
+        bot.remove_webhook()
     except Exception as e:
         print(f"Webhook remove error: {e}")
         
