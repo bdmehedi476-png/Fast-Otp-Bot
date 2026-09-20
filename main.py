@@ -7,7 +7,7 @@ import sqlite3
 from flask import Flask
 
 # ==================== CONFIGURATION ====================
-BOT_TOKEN = "8744378426:AAGa_m5DbLI8LGb9r4X_Rkm6Cz3i3zd64mw"
+BOT_TOKEN = "8923498683:AAHlHA8-GASExZDVnuR_lBORSaVvIhiqK5o"
 ADMIN_ID = 7159155182
 
 OTP_CHANNEL = "@FastOTPBot_1"
